@@ -2,7 +2,7 @@ name: Update GeoIP
 
 on:
   schedule:
-    - cron: '0 3 * * 1'   # 每周一自动更新
+    - cron: '0 3 * * 1'
   workflow_dispatch:
 
 jobs:
@@ -11,21 +11,22 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4   # ✅ 已升级（解决Node问题）
 
     - name: Download GeoLite2
       run: |
-        curl -L -o GeoLite2.tar.gz "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key=${{ secrets.MAXMIND_LICENSE_KEY }}&suffix=tar.gz"
+        curl -L -o geoip.tar.gz "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key=${{ secrets.MAXMIND_LICENSE_KEY }}&suffix=tar.gz"
 
     - name: Extract mmdb
       run: |
-        tar -xzf GeoLite2.tar.gz
-        mv GeoLite2-Country_*/GeoLite2-Country.mmdb Country.mmdb
+        tar -xzf geoip.tar.gz
+        find . -name "*.mmdb"
+        cp $(find . -name "*.mmdb") Country.mmdb
 
     - name: Commit & Push
       run: |
         git config user.name "github-actions"
         git config user.email "actions@github.com"
         git add Country.mmdb
-        git commit -m "Update GeoIP"
+        git commit -m "Update GeoIP" || echo "No changes"
         git push
