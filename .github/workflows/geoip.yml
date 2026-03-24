@@ -1,32 +1,96 @@
 name: Update GeoIP
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 3 * * 1'
-  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4   # ✅ 已升级（解决Node问题）
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Download GeoLite2
-      run: |
-        curl -L -o geoip.tar.gz "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key=${{ secrets.MAXMIND_LICENSE_KEY }}&suffix=tar.gz"
+      - name: Download GeoLite2 archive
+        shell: bash
+        run: |
+          set -euxo pipefail
 
-    - name: Extract mmdb
-      run: |
-        tar -xzf geoip.tar.gz
-        find . -name "*.mmdb"
-        cp $(find . -name "*.mmdb") Country.mmdb
+          URL="https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key=${{ secrets.MAXMIND_LICENSE_KEY }}&suffix=tar.gz"
 
-    - name: Commit & Push
-      run: |
-        git config user.name "github-actions"
-        git config user.email "actions@github.com"
-        git add Country.mmdb
-        git commit -m "Update GeoIP" || echo "No changes"
-        git push
+          echo "Downloading from MaxMind..."
+          curl -L --fail --show-error --silent \
+            -D headers.txt \
+            -o geoip.tar.gz \
+            "$URL"
+
+          echo "==== Response headers ===="
+          cat headers.txt
+
+          echo "==== File info ===="
+          ls -lh geoip.tar.gz
+          file geoip.tar.gz
+
+      - name: Validate archive
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          if ! tar -tzf geoip.tar.gz >/dev/null 2>&1; then
+            echo "Downloaded file is not a valid tar.gz archive."
+            echo "This usually means:"
+            echo "1) MAXMIND_LICENSE_KEY is wrong"
+            echo "2) GeoLite EULA/download permission is not ready"
+            echo "3) MaxMind returned an HTML error page instead of the database"
+            echo "==== First 50 lines of downloaded file (for diagnosis) ===="
+            strings geoip.tar.gz | head -n 50 || true
+            exit 1
+          fi
+
+      - name: Extract mmdb
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p extracted
+          tar -xzf geoip.tar.gz -C extracted
+
+          echo "==== Extracted files ===="
+          find extracted -maxdepth 5 -type f | sort
+
+          MMDB_PATH="$(find extracted -type f -name 'GeoLite2-Country.mmdb' | head -n 1)"
+
+          if [ -z "$MMDB_PATH" ]; then
+            echo "GeoLite2-Country.mmdb not found after extraction."
+            exit 1
+          fi
+
+          cp "$MMDB_PATH" Country.mmdb
+          ls -lh Country.mmdb
+          file Country.mmdb
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git add Country.mmdb
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Update GeoIP"
+          git push
